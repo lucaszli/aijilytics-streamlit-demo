@@ -245,6 +245,10 @@ Guidelines:
         }
 
     def format_output(self, state: GraphState) -> GraphState:
+        query = state["query"]
+        intent = state["intent"]
+        response = state["response"]
+        
         if state["intent"] == "off_topic":
             final_output = (
                 "This question is outside the scope of this AIJILYTICS demo.\n\n"
