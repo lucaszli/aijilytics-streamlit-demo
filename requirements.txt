@@ -1,0 +1,12 @@
+streamlit
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-text-splitters
+chromadb
+openai
+tiktoken
+python-dotenv
+pysqlite3-binary

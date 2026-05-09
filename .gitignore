@@ -1,0 +1,8 @@
+.streamlit/secrets.toml
+.env
+__pycache__/
+*.pyc
+chroma_db*/
+streamlit_chroma_db/
+local_chroma_db/
+.DS_Store
