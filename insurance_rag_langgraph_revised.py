@@ -281,20 +281,30 @@ Synthesized Response:
 {response}
 
 Your task:
-Rewrite the synthesized response into a clear, readable answer.
+Rewrite the synthesized response into a clear, readable final answer for the user.
 
-Formatting rules:
+Strict formatting rules:
 - Do NOT write Python code.
 - Do NOT write Streamlit code.
 - Do NOT include import statements.
 - Do NOT use st.title, st.header, st.write, st.markdown, or any code-like syntax.
 - Do NOT wrap the answer in code fences.
 - Output only the final user-facing answer.
+- Use normal Markdown only, such as short headings and bullet points.
 - Use plain English.
-- Use short headings and bullet points where helpful.
 - Keep the tone professional and user-friendly.
 - If the answer is about compliance or claims, be cautious and avoid legal guarantees.
 - If the answer is off-topic, briefly explain that it is outside the scope of this AIJILYTICS demo.
+
+Preferred structure:
+### Summary
+Give a short 2-3 sentence summary.
+
+### Key Points
+Use bullet points for the main answer.
+
+### Next Steps
+Give practical next steps if relevant.
 
 Final user-facing answer:
 """
