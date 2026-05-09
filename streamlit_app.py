@@ -74,7 +74,7 @@ if st.button("Run LangGraph Agent", type="primary"):
         st.warning(result.get("intent"))
 
     st.subheader("Final Output")
-    st.write(result.get("final_output", ""))
+    st.markdown(result.get("final_output", ""))
 
     if show_docs:
         st.subheader("Retrieved Documents from ChromaDB")
