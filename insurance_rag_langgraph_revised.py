@@ -269,25 +269,40 @@ Guidelines:
             }
 
         format_prompt = f"""
-Format the following RAG answer for a Streamlit demo.
+You are formatting the final response for a non-technical user in a Streamlit web app.
 
-Original user question:
-{state["query"]}
+Original User Query:
+{query}
 
-Draft answer:
-{state["response"]}
+Detected Intent:
+{intent}
 
-Create a concise, professional response with:
-1. Brief summary
-2. Main explanation
-3. Practical next steps or implications when relevant
+Synthesized Response:
+{response}
 
-Avoid over-formatting. Use headers and bullets where helpful.
+Your task:
+Rewrite the synthesized response into a clear, readable answer.
+
+Formatting rules:
+- Do NOT write Python code.
+- Do NOT write Streamlit code.
+- Do NOT include import statements.
+- Do NOT use st.title, st.header, st.write, st.markdown, or any code-like syntax.
+- Do NOT wrap the answer in code fences.
+- Output only the final user-facing answer.
+- Use plain English.
+- Use short headings and bullet points where helpful.
+- Keep the tone professional and user-friendly.
+- If the answer is about compliance or claims, be cautious and avoid legal guarantees.
+- If the answer is off-topic, briefly explain that it is outside the scope of this AIJILYTICS demo.
+
+Final user-facing answer:
 """
-        response = self.llm.invoke(format_prompt)
+        formatted_response = self.llm.invoke(format_prompt)
+        final_output = formatted_response.content
         return {
             **state,
-            "final_output": response.content,
+            "final_output": final_output,
             "metadata": {**state.get("metadata", {}), "formatting": "completed"},
         }
 
