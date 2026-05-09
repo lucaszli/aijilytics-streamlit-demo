@@ -41,19 +41,6 @@ agent = load_agent()
 with st.sidebar:
     st.header("Demo Guide")
     st.write("On-topic questions use ChromaDB retrieval and RAG synthesis. Off-topic questions skip retrieval.")
-    example_question = st.selectbox(
-        "Example questions",
-        [
-            "How does a customer initiate a claim in AIJILYTICS?",
-            "What are the NIIRA 2025 compliance requirements for claim settlement?",
-            "How does broker onboarding work in AIJILYTICS?",
-            "How does the business-facing AI agent support broker negotiation?",
-            "What is the purpose of ChromaDB in this RAG prototype?",
-            "How does the RAG agent use policy documents?",
-            "How does car insurance work in the United States?",
-            "What is the best stock to buy right now?",
-        ],
-    )
     show_docs = st.checkbox("Show retrieved ChromaDB documents", value=True)
     show_metadata = st.checkbox("Show metadata", value=True)
 
