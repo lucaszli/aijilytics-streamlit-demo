@@ -178,19 +178,21 @@ class InsuranceRAGAgent:
         intent_prompt = f"""
 Classify the user query as exactly one of these two categories:
 
-- on_topic: Related to AIJILYTICS, Nigerian insurance claims processing, broker onboarding,
+- on_topic: The query is related to AIJILYTICS, Nigerian insurance claims processing, broker onboarding,
 customer claim initiation, risk assessment, pricing support, compliance, NIIRA/NAICOM,
 broker-underwriter negotiation, case closure, LangGraph, RAG, ChromaDB, vector stores,
-or this prototype's technical architecture.
+retrieval, multi-query RAG, corrective RAG, or this prototype's technical architecture.
 
-- off_topic: Unrelated to this prototype. This includes insurance in other countries, unrelated
-finance/investing, food, school, health insurance recommendations, travel insurance recommendations,
-entertainment, or general knowledge not connected to AIJILYTICS.
+- off_topic: The query is unrelated to this prototype. This includes U.S. car insurance,
+insurance rules outside Nigeria/AIJILYTICS, unrelated finance/investing, food, school,
+health insurance recommendations, travel insurance recommendations, entertainment,
+or general knowledge not connected to AIJILYTICS.
 
 Rules:
-- If the query asks about this system, LangGraph, RAG, ChromaDB, or vector stores, classify as on_topic.
+- If the query asks about this system, AIJILYTICS, LangGraph, RAG, ChromaDB, vector stores, retrieval, corrective RAG, multi-query RAG, or the prototype's architecture, classify as on_topic.
+- If the query asks about claims, broker onboarding, compliance, risk assessment, negotiation, case closure, or Nigerian insurance workflows, classify as on_topic.
 - If the query asks about U.S. car insurance or insurance rules outside Nigeria/AIJILYTICS, classify as off_topic.
-- If the query asks for stock/investing advice, classify as off_topic.
+- If the query asks for stock/investing advice, food, entertainment, schoolwork, or unrelated general knowledge, classify as off_topic.
 - Respond with only one word: on_topic or off_topic.
 
 User Query:
