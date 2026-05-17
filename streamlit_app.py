@@ -86,22 +86,24 @@ def render_debug(result):
                             st.write(str(doc))
 
 
-def render_agent_tab(title, agent, tab_key):
+def render_agent_tab(agent_mode, title, description):
     st.subheader(title)
+    st.caption(description)
+
+    agent = load_agent(agent_mode)
 
     if "chat_histories" not in st.session_state:
         st.session_state.chat_histories = {}
 
-    if tab_key not in st.session_state.chat_histories:
-        st.session_state.chat_histories[tab_key] = []
+    if agent_mode not in st.session_state.chat_histories:
+        st.session_state.chat_histories[agent_mode] = []
 
-    messages = st.session_state.chat_histories[tab_key]
+    messages = st.session_state.chat_histories[agent_mode]
 
-    if st.button(f"Clear chat", key=f"clear_{tab_key}"):
-        st.session_state.chat_histories[tab_key] = []
+    if st.button("Clear chat", key=f"clear_{agent_mode}"):
+        st.session_state.chat_histories[agent_mode] = []
         st.rerun()
 
-    # First: display all existing messages
     for msg in messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -109,13 +111,11 @@ def render_agent_tab(title, agent, tab_key):
             if msg["role"] == "assistant" and "debug" in msg:
                 render_debug(msg["debug"])
 
-    # Second: keep chat input AFTER all displayed messages
     user_message = st.chat_input(
-        f"Ask {title} a question...",
-        key=f"chat_input_{tab_key}"
+        f"Ask the {title} a question...",
+        key=f"chat_input_{agent_mode}"
     )
 
-    # Third: process the new message
     if user_message:
         messages.append({"role": "user", "content": user_message})
 
