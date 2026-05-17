@@ -109,29 +109,17 @@ def render_agent_tab(tab_key: str, title: str, description: str):
         "Ask a question about the AIJILYTICS workflow or RAG prototype",
         key=f"chat_input_{tab_key}",
     )
-
     if user_message:
         messages.append({"role": "user", "content": user_message})
         with st.chat_message("user"):
             st.markdown(user_message)
 
-        recent_history = messages[-6:]
-        memory_context = "\n".join(
-            f"{m['role'].upper()}: {m['content']}"
-            for m in recent_history
-        )
-
-        memory_augmented_query = f"""
-Conversation history for this user profile:
-{memory_context}
-
-Current user question:
-{user_message}
-"""
-
         with st.chat_message("assistant"):
             with st.spinner(f"Running {title}..."):
-                result = agent.query(memory_augmented_query)
+                # Use only the current user message for intent classification and retrieval.
+                # This prevents the Corrective RAG tab from misclassifying on-topic questions
+                # because of old conversation history.
+                result = agent.query(user_message)
 
             final_answer = result.get("final_output", "")
             st.markdown(final_answer)
