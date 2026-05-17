@@ -86,46 +86,57 @@ def render_debug(result):
                             st.write(str(doc))
 
 
-def render_agent_tab(tab_key: str, title: str, description: str):
+def render_agent_tab(title, agent, tab_key):
     st.subheader(title)
-    st.write(description)
 
-    agent = load_agent(tab_key)
-    history_key, messages = ensure_history(tab_key)
+    if "chat_histories" not in st.session_state:
+        st.session_state.chat_histories = {}
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.caption(f"Current profile: {person_id}")
-    with col2:
-        if st.button("Clear this chat", key=f"clear_{tab_key}_{person_id}"):
-            st.session_state.chat_histories[history_key] = []
-            st.rerun()
+    if tab_key not in st.session_state.chat_histories:
+        st.session_state.chat_histories[tab_key] = []
 
+    messages = st.session_state.chat_histories[tab_key]
+
+    if st.button(f"Clear chat", key=f"clear_{tab_key}"):
+        st.session_state.chat_histories[tab_key] = []
+        st.rerun()
+
+    # First: display all existing messages
     for msg in messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
+            if msg["role"] == "assistant" and "debug" in msg:
+                render_debug(msg["debug"])
+
+    # Second: keep chat input AFTER all displayed messages
     user_message = st.chat_input(
-        "Ask a question about the AIJILYTICS workflow or RAG prototype",
-        key=f"chat_input_{tab_key}",
+        f"Ask {title} a question...",
+        key=f"chat_input_{tab_key}"
     )
+
+    # Third: process the new message
     if user_message:
         messages.append({"role": "user", "content": user_message})
+
         with st.chat_message("user"):
             st.markdown(user_message)
 
         with st.chat_message("assistant"):
             with st.spinner(f"Running {title}..."):
-                # Use only the current user message for intent classification and retrieval.
-                # This prevents the Corrective RAG tab from misclassifying on-topic questions
-                # because of old conversation history.
                 result = agent.query(user_message)
 
             final_answer = result.get("final_output", "")
             st.markdown(final_answer)
             render_debug(result)
 
-        messages.append({"role": "assistant", "content": final_answer})
+        messages.append({
+            "role": "assistant",
+            "content": final_answer,
+            "debug": result
+        })
+
+        st.rerun()
 
 
 tab_original, tab_multi, tab_corrective = st.tabs(
