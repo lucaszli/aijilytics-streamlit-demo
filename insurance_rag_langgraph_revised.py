@@ -1,10 +1,14 @@
 """
 AIJILYTICS Insurance Claims RAG Agent using LangGraph + ChromaDB.
-Streamlit-ready version.
+Streamlit-ready version with three RAG modes:
+- original: one-query baseline RAG
+- multi_query: query expansion + parallel ChromaDB retrieval
+- corrective: retrieval quality check + retry when context is weak
 """
 
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, TypedDict
 
 from dotenv import load_dotenv
@@ -27,6 +31,10 @@ class GraphState(TypedDict):
 
 
 class InsuranceRAGAgent:
+    """LangGraph RAG agent for the AIJILYTICS insurance claims demo."""
+
+    VALID_RAG_MODES = {"original", "multi_query", "corrective"}
+
     def __init__(
         self,
         persist_directory: Optional[str] = "./streamlit_chroma_db",
@@ -34,19 +42,25 @@ class InsuranceRAGAgent:
         model: str = "gpt-4o-mini",
         temperature: float = 0,
         retrieval_k: int = 3,
+        rag_mode: str = "original",
     ):
         if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY is not set.")
 
+        if rag_mode not in self.VALID_RAG_MODES:
+            raise ValueError(f"rag_mode must be one of {self.VALID_RAG_MODES}")
+
         self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.retrieval_k = retrieval_k
+        self.rag_mode = rag_mode
         self.llm = ChatOpenAI(model=model, temperature=temperature)
         self.embeddings = OpenAIEmbeddings()
         self.vectorstore: Optional[Chroma] = None
         self.graph = self._build_graph()
 
     def _sample_documents(self) -> List[Document]:
+        """Small AIJILYTICS knowledge base used for the prototype."""
         return [
             Document(
                 page_content=(
@@ -126,8 +140,24 @@ class InsuranceRAGAgent:
         ]
 
     def initialize_vectorstore(self, documents: List[Document], reset: bool = False) -> None:
+        """Create or load a ChromaDB vector store."""
         if reset and self.persist_directory and os.path.exists(self.persist_directory):
             shutil.rmtree(self.persist_directory, ignore_errors=True)
+
+        # Reuse existing Chroma collection when possible to avoid duplicate chunks on app reruns.
+        if not reset and self.persist_directory and os.path.exists(self.persist_directory):
+            try:
+                existing_store = Chroma(
+                    persist_directory=self.persist_directory,
+                    embedding_function=self.embeddings,
+                    collection_name=self.collection_name,
+                )
+                if existing_store._collection.count() > 0:
+                    self.vectorstore = existing_store
+                    print(f"Loaded existing vector store with {existing_store._collection.count()} chunks.")
+                    return
+            except Exception:
+                pass
 
         splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=150)
         chunks = splitter.split_documents(documents)
@@ -173,41 +203,158 @@ User Query:
         return {
             **state,
             "intent": intent,
-            "metadata": {**state.get("metadata", {}), "intent_detection": "completed"},
+            "metadata": {
+                **state.get("metadata", {}),
+                "intent_detection": "completed",
+                "rag_mode": self.rag_mode,
+            },
         }
 
     def route_after_intent(self, state: GraphState) -> str:
         return "format_output" if state["intent"] == "off_topic" else "rag_research"
 
-    def rag_research(self, state: GraphState) -> GraphState:
-        query = state["query"]
-        if self.vectorstore is None:
-            raise ValueError("Vector store not initialized. Call load_sample_insurance_data() first.")
-
+    def _generate_search_queries(self, query: str, n: int = 3) -> List[str]:
+        """Generate alternative search queries for multi-query and corrective RAG."""
         expansion_prompt = f"""
-Generate 3 concise search queries for retrieving relevant AIJILYTICS documentation from a vector store.
+Generate {n} concise search queries for retrieving relevant AIJILYTICS documentation from a vector store.
 Focus on insurance claims, broker workflows, compliance, risk assessment, negotiation support, ChromaDB,
 RAG, or LangGraph when relevant.
 
 User question:
 {query}
 
-Return exactly 3 lines. No numbering.
+Return exactly {n} lines. No numbering.
 """
         expansion_response = self.llm.invoke(expansion_prompt)
-        search_queries = [line.strip("-• 1234567890.").strip()
-                          for line in expansion_response.content.splitlines()
-                          if line.strip()][:3]
-        search_queries = [query] + search_queries
+        generated_queries = [
+            line.strip("-• 1234567890.").strip()
+            for line in expansion_response.content.splitlines()
+            if line.strip()
+        ][:n]
+        return [q for q in generated_queries if q]
+
+    def _retrieve_for_queries_parallel(self, search_queries: List[str]) -> List[Document]:
+        """Retrieve docs from ChromaDB for multiple queries in parallel and deduplicate chunks."""
+        if self.vectorstore is None:
+            raise ValueError("Vector store not initialized. Call load_sample_insurance_data() first.")
 
         docs_by_key: Dict[str, Document] = {}
-        for search_query in search_queries:
-            docs = self.vectorstore.similarity_search(search_query, k=self.retrieval_k)
-            for doc in docs:
-                docs_by_key[doc.page_content[:250]] = doc
 
-        retrieved_docs = list(docs_by_key.values())[: self.retrieval_k * 2]
-        retrieved_payload = [{"content": doc.page_content, "metadata": doc.metadata} for doc in retrieved_docs]
+        def search_one(search_query: str) -> List[Document]:
+            return self.vectorstore.similarity_search(search_query, k=self.retrieval_k)
+
+        max_workers = min(len(search_queries), 4) or 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(search_one, q): q for q in search_queries}
+            for future in as_completed(futures):
+                try:
+                    docs = future.result()
+                except Exception:
+                    docs = []
+                for doc in docs:
+                    docs_by_key[doc.page_content[:250]] = doc
+
+        return list(docs_by_key.values())
+
+    def _retrieve_original(self, query: str) -> Dict[str, Any]:
+        docs = self.vectorstore.similarity_search(query, k=self.retrieval_k)
+        return {
+            "docs": docs,
+            "search_queries": [query],
+            "retrieval_strategy": "single_query_similarity_search",
+        }
+
+    def _retrieve_multi_query(self, query: str) -> Dict[str, Any]:
+        generated_queries = self._generate_search_queries(query, n=3)
+        search_queries = [query] + generated_queries
+        docs = self._retrieve_for_queries_parallel(search_queries)
+        return {
+            "docs": docs[: self.retrieval_k * 2],
+            "search_queries": search_queries,
+            "retrieval_strategy": "multi_query_parallel_similarity_search",
+        }
+
+    def _judge_context_quality(self, query: str, docs: List[Document]) -> Dict[str, str]:
+        """Use the LLM as a lightweight judge for retrieved context sufficiency."""
+        if not docs:
+            return {"score": "insufficient", "reason": "No documents were retrieved."}
+
+        context_preview = "\n\n".join(doc.page_content[:700] for doc in docs)
+        judge_prompt = f"""
+You are evaluating whether retrieved context is sufficient for answering a user's question.
+
+User question:
+{query}
+
+Retrieved context:
+{context_preview}
+
+Return exactly two lines:
+score: sufficient or insufficient
+reason: short reason
+"""
+        judge_response = self.llm.invoke(judge_prompt).content.strip()
+        score = "insufficient"
+        reason = judge_response
+        for line in judge_response.splitlines():
+            lower = line.lower()
+            if lower.startswith("score:"):
+                value = lower.split(":", 1)[1].strip()
+                if "sufficient" in value and "insufficient" not in value:
+                    score = "sufficient"
+                else:
+                    score = "insufficient"
+            elif lower.startswith("reason:"):
+                reason = line.split(":", 1)[1].strip()
+        return {"score": score, "reason": reason}
+
+    def _retrieve_corrective(self, query: str) -> Dict[str, Any]:
+        """Retrieve, judge context quality, and retry with query expansion if weak."""
+        initial_docs = self.vectorstore.similarity_search(query, k=self.retrieval_k)
+        quality = self._judge_context_quality(query, initial_docs)
+
+        if quality["score"] == "sufficient":
+            return {
+                "docs": initial_docs,
+                "search_queries": [query],
+                "retrieval_strategy": "corrective_initial_retrieval_sufficient",
+                "retrieval_quality": quality,
+                "correction_applied": False,
+            }
+
+        generated_queries = self._generate_search_queries(query, n=3)
+        search_queries = [query] + generated_queries
+        corrected_docs = self._retrieve_for_queries_parallel(search_queries)
+        corrected_quality = self._judge_context_quality(query, corrected_docs[: self.retrieval_k * 2])
+
+        return {
+            "docs": corrected_docs[: self.retrieval_k * 2],
+            "search_queries": search_queries,
+            "retrieval_strategy": "corrective_retry_with_multi_query_retrieval",
+            "retrieval_quality": corrected_quality,
+            "initial_retrieval_quality": quality,
+            "correction_applied": True,
+        }
+
+    def rag_research(self, state: GraphState) -> GraphState:
+        query = state["query"]
+        if self.vectorstore is None:
+            raise ValueError("Vector store not initialized. Call load_sample_insurance_data() first.")
+
+        if self.rag_mode == "original":
+            retrieval_result = self._retrieve_original(query)
+        elif self.rag_mode == "multi_query":
+            retrieval_result = self._retrieve_multi_query(query)
+        elif self.rag_mode == "corrective":
+            retrieval_result = self._retrieve_corrective(query)
+        else:
+            raise ValueError(f"Unsupported rag_mode: {self.rag_mode}")
+
+        retrieved_docs = retrieval_result["docs"]
+        retrieved_payload = [
+            {"content": doc.page_content, "metadata": doc.metadata}
+            for doc in retrieved_docs
+        ]
 
         context = "\n\n".join(
             f"Source metadata: {doc.metadata}\nContent: {doc.page_content}"
@@ -216,6 +363,9 @@ Return exactly 3 lines. No numbering.
 
         synthesis_prompt = f"""
 You are a RAG assistant for the AIJILYTICS insurance claims processing prototype.
+
+RAG mode:
+{self.rag_mode}
 
 User question:
 {query}
@@ -232,23 +382,34 @@ Guidelines:
 - AI outputs are advisory and should remain human-reviewable when discussing decisions.
 """
         response = self.llm.invoke(synthesis_prompt)
+
+        metadata = {
+            **state.get("metadata", {}),
+            "rag_research": "completed",
+            "rag_mode": self.rag_mode,
+            "retrieval_strategy": retrieval_result.get("retrieval_strategy"),
+            "search_queries": retrieval_result.get("search_queries", []),
+            "retrieved_doc_count": len(retrieved_payload),
+        }
+        if "retrieval_quality" in retrieval_result:
+            metadata["retrieval_quality"] = retrieval_result["retrieval_quality"]
+        if "initial_retrieval_quality" in retrieval_result:
+            metadata["initial_retrieval_quality"] = retrieval_result["initial_retrieval_quality"]
+        if "correction_applied" in retrieval_result:
+            metadata["correction_applied"] = retrieval_result["correction_applied"]
+
         return {
             **state,
             "retrieved_docs": retrieved_payload,
             "response": response.content,
-            "metadata": {
-                **state.get("metadata", {}),
-                "rag_research": "completed",
-                "search_queries": search_queries,
-                "retrieved_doc_count": len(retrieved_payload),
-            },
+            "metadata": metadata,
         }
 
     def format_output(self, state: GraphState) -> GraphState:
         query = state["query"]
         intent = state["intent"]
         response = state["response"]
-        
+
         if state["intent"] == "off_topic":
             final_output = (
                 "This question is outside the scope of this AIJILYTICS demo.\n\n"

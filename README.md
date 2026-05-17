@@ -1,32 +1,31 @@
 # AIJILYTICS Streamlit RAG Demo
 
-This Streamlit app demos a simple LangGraph + ChromaDB + RAG workflow.
+This Streamlit app compares three LangGraph + ChromaDB RAG architectures for the AIJILYTICS insurance claims workflow.
 
-## Files
+## Tabs
 
-- `streamlit_app.py` — Streamlit UI
-- `insurance_rag_langgraph_revised.py` — LangGraph/RAG/ChromaDB backend
-- `requirements.txt` — dependencies
-- `.gitignore` — prevents secrets and local Chroma folders from being committed
+1. **Original RAG Agent**  
+   Single-query baseline retrieval from ChromaDB.
 
-## Local setup
+2. **Multi-Query RAG Agent**  
+   Generates multiple related retrieval queries and runs ChromaDB retrieval in parallel.
+
+3. **Corrective RAG Agent**  
+   Retrieves context, uses an LLM-based sufficiency check, and retries with multi-query retrieval if the first retrieval is weak.
+
+## Local Run
 
 ```bash
 pip install -r requirements.txt
-```
-
-Create `.streamlit/secrets.toml`:
-
-```toml
-OPENAI_API_KEY = "your_openai_api_key_here"
-```
-
-Run:
-
-```bash
 streamlit run streamlit_app.py
 ```
 
-## Streamlit Cloud
+## Streamlit Secrets
 
-Push these files to GitHub, deploy `streamlit_app.py`, and add `OPENAI_API_KEY` in Streamlit secrets.
+Add this in Streamlit Cloud secrets:
+
+```toml
+OPENAI_API_KEY = "your_openai_key_here"
+```
+
+Do not commit API keys to GitHub.
