@@ -14,7 +14,7 @@ from insurance_rag_langgraph_revised import InsuranceRAGAgent
 st.set_page_config(page_title="AIJILYTICS RAG Agent Demo", layout="wide")
 
 st.title("AIJILYTICS Insurance RAG Agent Demo")
-st.caption("Streamlit demo comparing Original RAG, Multi-Query RAG, and Corrective RAG")
+st.caption("Streamlit demo for LangGraph + ChromaDB + RAG workflow")
 
 
 try:
@@ -43,47 +43,52 @@ def load_agent(rag_mode: str):
 
 with st.sidebar:
     st.header("Demo Guide")
-    st.write("Compare three RAG architectures using the same AIJILYTICS knowledge base.")
-    show_docs = st.checkbox("Show retrieved ChromaDB documents", value=True)
-    show_metadata = st.checkbox("Show metadata", value=True)
-
-    st.divider()
+    st.write("Each tab uses the same AIJILYTICS documentation base but applies a different RAG strategy.")
+    st.write("Off-topic questions skip retrieval.")
     person_id = st.selectbox(
         "Select user profile",
         ["Customer", "Broker", "Underwriter", "Admin Demo"],
     )
+    show_docs = st.checkbox("Show retrieved ChromaDB documents", value=True)
+    show_metadata = st.checkbox("Show metadata", value=True)
 
-
-def ensure_history(tab_key: str):
-    if "chat_histories" not in st.session_state:
-        st.session_state.chat_histories = {}
-    history_key = f"{person_id}_{tab_key}"
-    if history_key not in st.session_state.chat_histories:
-        st.session_state.chat_histories[history_key] = []
-    return history_key, st.session_state.chat_histories[history_key]
+    st.markdown("---")
+    st.markdown("### Suggested tests")
+    st.markdown(
+        """
+- What does the policy say about excess?
+- What fields are in the motor accident report form?
+- What is the claims notification clause?
+- What does the motor certificate say about limitations as to use?
+- What does the discharge voucher say about the settlement amount?
+"""
+    )
 
 
 def render_debug(result):
-    with st.expander("Debug details", expanded=False):
-        st.write("Detected intent:", result.get("intent", ""))
+    if show_docs:
+        st.subheader("Retrieved Documents from ChromaDB / Exact Store")
+        docs = result.get("retrieved_docs", [])
+        if not docs:
+            st.info("No documents retrieved. This is expected for off-topic queries.")
+        else:
+            for i, doc in enumerate(docs, 1):
+                meta = doc.get("metadata", {}) if isinstance(doc, dict) else {}
+                title = f"Retrieved Document {i}"
+                if meta:
+                    title += f" — {meta.get('source', 'Unknown source')}"
+                    if meta.get("page"):
+                        title += f" | page {meta.get('page')}"
+                with st.expander(title):
+                    if isinstance(doc, dict):
+                        st.markdown(doc.get("content", ""))
+                        st.json(meta)
+                    else:
+                        st.write(str(doc))
 
-        if show_metadata:
-            st.write("Metadata")
-            st.json(result.get("metadata", {}))
-
-        if show_docs:
-            st.write("Retrieved Documents from ChromaDB")
-            docs = result.get("retrieved_docs", [])
-            if not docs:
-                st.info("No documents retrieved. This is expected for off-topic queries.")
-            else:
-                for i, doc in enumerate(docs, 1):
-                    with st.expander(f"Retrieved Document {i}"):
-                        if isinstance(doc, dict):
-                            st.write(doc.get("content", ""))
-                            st.json(doc.get("metadata", {}))
-                        else:
-                            st.write(str(doc))
+    if show_metadata:
+        st.subheader("Metadata")
+        st.json(result.get("metadata", {}))
 
 
 def render_agent_tab(agent_mode, title, description):
@@ -91,32 +96,36 @@ def render_agent_tab(agent_mode, title, description):
     st.caption(description)
 
     agent = load_agent(agent_mode)
+    history_key = f"{person_id}_{agent_mode}"
 
     if "chat_histories" not in st.session_state:
         st.session_state.chat_histories = {}
 
-    if agent_mode not in st.session_state.chat_histories:
-        st.session_state.chat_histories[agent_mode] = []
+    if history_key not in st.session_state.chat_histories:
+        st.session_state.chat_histories[history_key] = []
 
-    messages = st.session_state.chat_histories[agent_mode]
+    messages = st.session_state.chat_histories[history_key]
 
-    if st.button("Clear chat", key=f"clear_{agent_mode}"):
-        st.session_state.chat_histories[agent_mode] = []
+    if st.button("Clear this tab's chat", key=f"clear_{history_key}"):
+        st.session_state.chat_histories[history_key] = []
         st.rerun()
 
     for msg in messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-
             if msg["role"] == "assistant" and "debug" in msg:
-                render_debug(msg["debug"])
+                with st.expander("Debug details from this response"):
+                    render_debug(msg["debug"])
 
-    user_message = st.chat_input(
-        f"Ask the {title} a question...",
-        key=f"chat_input_{agent_mode}"
-    )
+    with st.form(key=f"form_{history_key}", clear_on_submit=True):
+        user_message = st.text_input(
+            "Ask a question",
+            placeholder="Example: What does the policy say about excess?",
+            key=f"input_{history_key}",
+        )
+        submitted = st.form_submit_button("Run Agent")
 
-    if user_message:
+    if submitted and user_message:
         messages.append({"role": "user", "content": user_message})
 
         with st.chat_message("user"):
@@ -124,44 +133,57 @@ def render_agent_tab(agent_mode, title, description):
 
         with st.chat_message("assistant"):
             with st.spinner(f"Running {title}..."):
+                # Use only the latest user message for intent classification and retrieval.
                 result = agent.query(user_message)
 
             final_answer = result.get("final_output", "")
             st.markdown(final_answer)
-            render_debug(result)
+
+            with st.expander("Debug details from this response"):
+                render_debug(result)
 
         messages.append({
             "role": "assistant",
             "content": final_answer,
-            "debug": result
+            "debug": result,
         })
 
         st.rerun()
 
 
-tab_original, tab_multi, tab_corrective = st.tabs(
-    ["Original RAG Agent", "Multi-Query RAG Agent", "Corrective RAG Agent"]
-)
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Original RAG Agent",
+    "Multi-Query RAG Agent",
+    "Corrective RAG Agent",
+    "Hybrid Exact-Match RAG Agent",
+])
 
-with tab_original:
+with tab1:
     render_agent_tab(
         "original",
         "Original RAG Agent",
         "Baseline architecture: classifies on-topic/off-topic, retrieves once from ChromaDB using the original user query, synthesizes, then formats the response.",
     )
 
-with tab_multi:
+with tab2:
     render_agent_tab(
         "multi_query",
         "Multi-Query RAG Agent",
-        "Expanded retrieval architecture: generates multiple search queries, retrieves from ChromaDB in parallel, deduplicates chunks, synthesizes, then formats the response.",
+        "Generates multiple retrieval queries, searches ChromaDB with each query, deduplicates results, synthesizes, then formats the response.",
     )
 
-with tab_corrective:
+with tab3:
     render_agent_tab(
         "corrective",
         "Corrective RAG Agent",
-        "Self-checking architecture: retrieves context, uses an LLM-based sufficiency check, and retries with multi-query retrieval if the first retrieval is weak.",
+        "Retrieves documents, checks whether the context is sufficient, and retries retrieval with improved queries when the first retrieval is weak.",
+    )
+
+with tab4:
+    render_agent_tab(
+        "hybrid_exact",
+        "Hybrid Exact-Match RAG Agent",
+        "Uses exact keyword/phrase matching over policy, certificate, claim-form, and discharge-voucher excerpts, plus vector fallback. This tab preserves exact document language word-for-word.",
     )
 
 st.divider()
@@ -169,11 +191,12 @@ st.markdown(
     """
 ### Workflow
 
-`User Query → classify_intent → conditional route → rag_research if on-topic → format_output → final answer`
+`User Query → classify_intent → conditional route → selected RAG strategy → format_output → final answer`
 
-- **Original RAG** retrieves once using the original query.
-- **Multi-Query RAG** expands the query and retrieves from ChromaDB in parallel.
-- **Corrective RAG** judges retrieval quality and retries retrieval when context is weak.
-- **Off-topic queries** skip retrieval and receive a scope-limited response.
+- **Original RAG** retrieves once from ChromaDB.
+- **Multi-Query RAG** generates multiple search queries and retrieves broader context.
+- **Corrective RAG** checks retrieval quality and retries if needed.
+- **Hybrid Exact-Match RAG** looks for exact policy/form/certificate/DV language and preserves exact wording.
+- **All agents** use the AIJILYTICS workflow summaries plus exact uploaded documentation excerpts.
 """
 )

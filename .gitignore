@@ -6,3 +6,5 @@ chroma_db*/
 streamlit_chroma_db/
 local_chroma_db/
 .DS_Store
+
+streamlit_chroma_db_*/
